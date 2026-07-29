@@ -3,7 +3,7 @@ use godot::init::{gdextension, ExtensionLibrary, InitLevel};
 pub(crate) mod engine {
     pub(crate) struct Engine;
 }
-mod clicker_game;
+pub mod clicker_game;
 mod raw_engine_init {
     use godot::{
         init::InitLevel,
@@ -16,7 +16,7 @@ mod raw_engine_init {
 
     #[derive(GodotClass)]
     #[class(base = Object, init)]
-    struct RuntimeGuard;
+    struct RuntimeGuard {}
 
     #[godot_api]
     impl RuntimeGuard {

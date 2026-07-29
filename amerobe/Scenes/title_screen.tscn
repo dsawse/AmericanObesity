@@ -1,29 +1,12 @@
-[gd_scene load_steps=5 format=3 uid="uid://bhfiqvlcq54pc"]
+[gd_scene load_steps=2 format=3 uid="uid://bhfiqvlcq54pc"]
 
 [ext_resource type="Script" path="res://Scripts/title_screen.gd" id="1_0hyng"]
-[ext_resource type="Texture2D" uid="uid://v0fe1tm1ysyw" path="res://art/start_screen.png" id="2_k07c7"]
 
-[sub_resource type="Gradient" id="Gradient_v5n8l"]
-offsets = PackedFloat32Array(0.214286, 0.298701, 0.753247)
-colors = PackedColorArray(0.94902, 0, 0, 1, 0.0728426, 0.0728426, 0.0728427, 1, 1, 1, 1, 1)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_1erhg"]
-gradient = SubResource("Gradient_v5n8l")
-
-[node name="Node2D" type="Node2D"]
+[node name="TitleScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_0hyng")
-
-[node name="StartScreen" type="Sprite2D" parent="."]
-position = Vector2(960, 540)
-scale = Vector2(1.875, 1.05469)
-texture = ExtResource("2_k07c7")
-
-[node name="Button" type="Button" parent="."]
-offset_left = 872.0
-offset_top = 232.0
-offset_right = 1046.0
-offset_bottom = 341.0
-text = "PLAY"
-icon = SubResource("GradientTexture2D_1erhg")
-
-[connection signal="pressed" from="Button" to="." method="_on_button_pressed"]

@@ -1,9 +1,18 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Scratch art folders that are not part of the build.
 /art/Food/
 /art/Food\ and\ Store/
 /art/FreePixelFood/
 /art/More\ Food/
 /art/Pallettes/
-/art/*.png
+
+# NOTE: `/art/*.png` used to live here, which is why several `.import` files in
+# art/ point at PNGs that were never committed. Source art must be tracked or
+# the project cannot import it — the game falls back to procedurally drawn
+# placeholders (see Scripts/placeholder_art.gd) for anything still missing.
+
+# Editor scratch files.
+*.tmp

@@ -3,15 +3,20 @@ entry_symbol = "engine_init"
 compatibility_minimum = 4.1
 reloadable = false
 
+; NOTE: `Cargo.toml` at the repository root declares a workspace, so cargo
+; writes every member's artifacts to `<repo>/target/`, not `<repo>/engine/target/`.
+; `res://` is `<repo>/amerobe/`, which makes the correct prefix `res://../target/`.
+; The old `res://../engine/target/` paths never resolved, so the extension was
+; silently absent and none of the game logic ran.
 
 [libraries]
-linux.debug.x86_64 = "res://../engine/target/debug/libengine.so"
-linux.release.x86_64 = "res://../engine/target/release/libengine.so"
-windows.debug.x86_64 = "res://../engine/target/debug/engine.dll"
-windows.release.x86_64 = "res://../engine/target/release/engine.dll"
-macos.debug = "res://../engine/target/debug/libengine.dylib"
-macos.release = "res://../engine/target/release/libengine.dylib"
-macos.debug.arm64 = "res://../engine/target/debug/libengine.dylib"
-macos.release.arm64 = "res://../engine/target/release/libengine.dylib"
-web.debug.wasm32 = "res://../engine/target/wasm32-unknown-emscripten/debug/engine.wasm"
-web.release.wasm32 = "res://../engine/target/wasm32-unknown-emscripten/release/engine.wasm"
+linux.debug.x86_64 = "res://../target/debug/libengine.so"
+linux.release.x86_64 = "res://../target/release/libengine.so"
+windows.debug.x86_64 = "res://../target/debug/engine.dll"
+windows.release.x86_64 = "res://../target/release/engine.dll"
+macos.debug = "res://../target/debug/libengine.dylib"
+macos.release = "res://../target/release/libengine.dylib"
+macos.debug.arm64 = "res://../target/debug/libengine.dylib"
+macos.release.arm64 = "res://../target/release/libengine.dylib"
+web.debug.wasm32 = "res://../target/wasm32-unknown-emscripten/debug/engine.wasm"
+web.release.wasm32 = "res://../target/wasm32-unknown-emscripten/release/engine.wasm"

@@ -1,103 +1,98 @@
-extends Control  # Changed from Node to Control
+class_name UiTheme
+extends RefCounted
 
-# Constants for UI styling
-const COLORS = {
-	"background": Color(0.1, 0.1, 0.1, 0.95),
-	"panel": Color(0.15, 0.15, 0.15, 0.9),
-	"text_normal": Color(1.0, 1.0, 1.0, 1.0),
-	"text_highlight": Color(1.0, 0.8, 0.2, 1.0),
-	"progress_fg": Color(0.2, 0.8, 0.2, 1.0),
-	"progress_bg": Color(0.2, 0.2, 0.2, 0.5)
-}
+## Central place for the game's colours and StyleBox factories.
+##
+## Everything is built in code rather than as a .tres so the look can be tuned
+## from one file and stays consistent across the procedurally-built screens.
 
-func _ready() -> void:
-	# Create theme
-	var theme = Theme.new()
-	
-	# Set up styles
-	setup_panel_style(theme)
-	setup_label_style(theme)
-	setup_button_style(theme)
-	setup_progress_style(theme)
-	
-	# Apply theme to the UI root (this node)
-	self.theme = theme
-	
-	# Make this node fill the viewport
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+const BG_DARK := Color(0.08, 0.07, 0.09, 0.94)
+const BG_PANEL := Color(0.13, 0.12, 0.15, 0.94)
+const BG_ROW := Color(0.17, 0.16, 0.19, 0.90)
+const BG_ROW_HOVER := Color(0.23, 0.21, 0.25, 0.95)
+const ACCENT := Color(0.91, 0.42, 0.19)
+const ACCENT_DIM := Color(0.45, 0.24, 0.13)
+const GOOD := Color(0.36, 0.78, 0.38)
+const LOCKED := Color(0.42, 0.40, 0.44)
+const TEXT := Color(0.96, 0.95, 0.93)
+const TEXT_DIM := Color(0.68, 0.66, 0.70)
+const GOLD := Color(0.98, 0.80, 0.31)
 
-func setup_panel_style(theme: Theme) -> void:
-	var style = StyleBoxFlat.new()
-	style.bg_color = COLORS.background
-	style.corner_radius_top_left = 10
-	style.corner_radius_top_right = 10
-	style.corner_radius_bottom_left = 10
-	style.corner_radius_bottom_right = 10
-	style.content_margin_left = 20
-	style.content_margin_right = 20
-	style.content_margin_top = 15
-	style.content_margin_bottom = 15
-	
-	theme.set_stylebox("panel", "PanelContainer", style)
 
-func setup_label_style(theme: Theme) -> void:
-	var style = StyleBoxFlat.new()
-	style.bg_color = COLORS.panel
-	style.corner_radius_top_left = 5
-	style.corner_radius_top_right = 5
-	style.corner_radius_bottom_left = 5
-	style.corner_radius_bottom_right = 5
-	style.content_margin_left = 10
-	style.content_margin_right = 10
-	style.content_margin_top = 8
-	style.content_margin_bottom = 8
-	
-	theme.set_stylebox("normal", "Label", style)
-	theme.set_color("font_color", "Label", COLORS.text_normal)
-	theme.set_font_size("font_size", "Label", 24)
+static func panel(bg: Color = BG_PANEL, radius: int = 10, border: int = 0,
+		border_color: Color = ACCENT) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = bg
+	style.corner_radius_top_left = radius
+	style.corner_radius_top_right = radius
+	style.corner_radius_bottom_left = radius
+	style.corner_radius_bottom_right = radius
+	style.content_margin_left = 14
+	style.content_margin_right = 14
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
+	if border > 0:
+		style.border_width_left = border
+		style.border_width_right = border
+		style.border_width_top = border
+		style.border_width_bottom = border
+		style.border_color = border_color
+	return style
 
-func setup_button_style(theme: Theme) -> void:
-	# Normal state
-	var normal_style = StyleBoxFlat.new()
-	normal_style.bg_color = COLORS.panel
-	normal_style.corner_radius_top_left = 8
-	normal_style.corner_radius_top_right = 8
-	normal_style.corner_radius_bottom_left = 8
-	normal_style.corner_radius_bottom_right = 8
-	normal_style.border_width_left = 2
-	normal_style.border_width_right = 2
-	normal_style.border_width_top = 2
-	normal_style.border_width_bottom = 2
-	normal_style.border_color = COLORS.text_highlight
-	
-	# Hover state
-	var hover_style = normal_style.duplicate()
-	hover_style.bg_color = COLORS.panel.lightened(0.2)
-	
-	# Pressed state
-	var pressed_style = normal_style.duplicate()
-	pressed_style.bg_color = COLORS.panel.darkened(0.2)
-	
-	theme.set_stylebox("normal", "Button", normal_style)
-	theme.set_stylebox("hover", "Button", hover_style)
-	theme.set_stylebox("pressed", "Button", pressed_style)
 
-func setup_progress_style(theme: Theme) -> void:
-	# Background
-	var bg_style = StyleBoxFlat.new()
-	bg_style.bg_color = COLORS.progress_bg
-	bg_style.corner_radius_top_left = 4
-	bg_style.corner_radius_top_right = 4
-	bg_style.corner_radius_bottom_left = 4
-	bg_style.corner_radius_bottom_right = 4
-	
-	# Fill
-	var fg_style = StyleBoxFlat.new()
-	fg_style.bg_color = COLORS.progress_fg
-	fg_style.corner_radius_top_left = 4
-	fg_style.corner_radius_top_right = 4
-	fg_style.corner_radius_bottom_left = 4
-	fg_style.corner_radius_bottom_right = 4
-	
-	theme.set_stylebox("background", "ProgressBar", bg_style)
-	theme.set_stylebox("fill", "ProgressBar", fg_style)
+static func flat(color: Color, radius: int = 6) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.corner_radius_top_left = radius
+	style.corner_radius_top_right = radius
+	style.corner_radius_bottom_left = radius
+	style.corner_radius_bottom_right = radius
+	return style
+
+
+static func style_label(label: Label, size: int, color: Color = TEXT) -> Label:
+	label.add_theme_font_size_override("font_size", size)
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_constant_override("outline_size", maxi(2, size / 10))
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	return label
+
+
+static func make_label(text: String, size: int, color: Color = TEXT) -> Label:
+	var label := Label.new()
+	label.text = text
+	return style_label(label, size, color)
+
+
+static func style_progress(bar: ProgressBar, fill: Color,
+		bg: Color = Color(0.18, 0.17, 0.20, 0.9)) -> ProgressBar:
+	bar.show_percentage = false
+	bar.add_theme_stylebox_override("background", flat(bg, 5))
+	bar.add_theme_stylebox_override("fill", flat(fill, 5))
+	return bar
+
+
+static func style_button(button: Button, base: Color = ACCENT) -> Button:
+	var normal := flat(base, 8)
+	normal.content_margin_left = 18
+	normal.content_margin_right = 18
+	normal.content_margin_top = 10
+	normal.content_margin_bottom = 10
+
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = base.lightened(0.15)
+
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = base.darkened(0.20)
+
+	var disabled := normal.duplicate() as StyleBoxFlat
+	disabled.bg_color = LOCKED.darkened(0.3)
+
+	button.add_theme_stylebox_override("normal", normal)
+	button.add_theme_stylebox_override("hover", hover)
+	button.add_theme_stylebox_override("pressed", pressed)
+	button.add_theme_stylebox_override("disabled", disabled)
+	button.add_theme_color_override("font_color", TEXT)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.add_theme_color_override("font_disabled_color", TEXT_DIM)
+	return button
