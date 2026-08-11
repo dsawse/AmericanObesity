@@ -2,12 +2,18 @@ extends Control
 
 ## The kitchen: HUD, food cards, upgrade shop, achievements and toasts.
 ##
-## The whole screen is built in code so the scene file stays a single node.
-## That keeps the layout reviewable in one place and avoids the drift that
-## comes from half the UI living in a .tscn and half of it in _ready().
+## The screen is built in code, and the same panels are re-parented into a
+## different container arrangement depending on whether we are on a wide
+## display or a phone in portrait. Building the panels once and swapping only
+## their layout means there is no duplicated widget code between the two modes.
 
 const SHOP_REFRESH_INTERVAL := 0.15
-const FOOD_COLUMNS := 3
+
+enum Layout { UNSET, LANDSCAPE, PORTRAIT }
+
+## Below this viewport width we treat the device as a phone regardless of
+## orientation, because three columns stop being readable.
+const NARROW_WIDTH := 900.0
 
 var _food_cards: Dictionary = {}
 var _upgrade_rows: Dictionary = {}
@@ -17,10 +23,22 @@ var _buy_count := 1
 var _shop_accum := 0.0
 var _last_tier := -1
 var _last_click_mult := -1.0
+var _layout_mode: Layout = Layout.UNSET
+
+# Persistent panels. These survive layout changes; only their parents change.
+var _hud: PanelContainer
+var _character: TextureRect
+var _food_panel: Control
+var _tabs: TabContainer
+var _footer: Control
+
+# Containers rebuilt on every layout change.
+var _margin: MarginContainer
+var _layout_root: Control
 
 var _background: TextureRect
-var _character: TextureRect
 var _weight_label: Label
+var _class_label: Label
 var _pound_bar: ProgressBar
 var _pound_caption: Label
 var _tier_label: Label
@@ -29,11 +47,12 @@ var _tier_caption: Label
 var _bank_label: Label
 var _cps_label: Label
 var _click_label: Label
-var _stats_label: Label
 var _headline: Label
 var _food_grid: GridContainer
 var _upgrade_column: VBoxContainer
 var _achievement_column: VBoxContainer
+var _stats_column: VBoxContainer
+var _stats_lines: Array[Label] = []
 var _buy_buttons: Array[Button] = []
 var _toasts: ToastLayer
 
@@ -56,8 +75,6 @@ func _ready() -> void:
 
 	_rebuild_upgrade_rows()
 	_rebuild_achievement_rows()
-	# _refresh_hud() notices the tier is new and builds the food cards, sets the
-	# headline and picks the artwork, so there is exactly one code path for it.
 	_refresh_hud()
 	_refresh_shop()
 
@@ -98,19 +115,16 @@ func _build_ui() -> void:
 	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(scrim)
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 28)
-	add_child(margin)
+	_margin = MarginContainer.new()
+	_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_margin)
 
-	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", 22)
-	margin.add_child(columns)
-
-	columns.add_child(_build_left_column())
-	columns.add_child(_build_center_column())
-	columns.add_child(_build_right_column())
+	# Build the panels once. _apply_layout() decides where they live.
+	_hud = _build_hud()
+	_character = _build_character()
+	_food_panel = _build_food_panel()
+	_tabs = _build_tabs()
+	_footer = _build_footer()
 
 	_toasts = ToastLayer.new()
 	_toasts.anchor_left = 0.5
@@ -124,30 +138,112 @@ func _build_ui() -> void:
 	_toasts.grow_vertical = Control.GROW_DIRECTION_END
 	add_child(_toasts)
 
+	_apply_layout()
+	resized.connect(_apply_layout)
 
-func _build_left_column() -> Control:
-	var column := VBoxContainer.new()
-	column.custom_minimum_size = Vector2(380, 0)
-	column.add_theme_constant_override("separation", 14)
 
-	_character = TextureRect.new()
+## True when the current viewport should use the stacked phone layout.
+func _is_portrait() -> bool:
+	var vp := get_viewport_rect().size
+	return vp.y > vp.x or vp.x < NARROW_WIDTH
+
+
+func _apply_layout() -> void:
+	var mode := Layout.PORTRAIT if _is_portrait() else Layout.LANDSCAPE
+	if mode == _layout_mode and is_instance_valid(_layout_root):
+		# Orientation is unchanged, but the grid still adapts to width.
+		_update_grid_columns()
+		return
+	_layout_mode = mode
+
+	# Detach the panels so the container swap below cannot free them.
+	for piece: Control in [_hud, _character, _food_panel, _tabs, _footer]:
+		if is_instance_valid(piece) and piece.get_parent() != null:
+			piece.get_parent().remove_child(piece)
+
+	if is_instance_valid(_layout_root):
+		_margin.remove_child(_layout_root)
+		_layout_root.queue_free()
+
+	var pad := 12 if mode == Layout.PORTRAIT else 28
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		_margin.add_theme_constant_override(side, pad)
+
+	_layout_root = _build_portrait() if mode == Layout.PORTRAIT else _build_landscape()
+	_margin.add_child(_layout_root)
+
+	_update_grid_columns()
+	_resize_food_cards()
+
+
+func _build_landscape() -> Control:
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation", 22)
+
+	var left := VBoxContainer.new()
+	left.custom_minimum_size = Vector2(380, 0)
+	left.add_theme_constant_override("separation", 14)
 	_character.custom_minimum_size = Vector2(0, 360)
-	_character.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_character.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_character.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_character.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(_character)
+	left.add_child(_character)
+	left.add_child(_hud)
+	columns.add_child(left)
 
+	var centre := VBoxContainer.new()
+	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centre.add_theme_constant_override("separation", 14)
+	centre.add_child(_food_panel)
+	columns.add_child(centre)
+
+	var right := VBoxContainer.new()
+	right.custom_minimum_size = Vector2(470, 0)
+	right.add_theme_constant_override("separation", 10)
+	right.add_child(_tabs)
+	right.add_child(_footer)
+	columns.add_child(right)
+
+	return columns
+
+
+func _build_portrait() -> Control:
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 10)
+
+	# A short character strip keeps the progression visible without eating the
+	# screen; the HUD sits directly under it.
+	_character.custom_minimum_size = Vector2(0, 150)
+	_character.size_flags_vertical = Control.SIZE_FILL
+	stack.add_child(_character)
+	stack.add_child(_hud)
+
+	# Food on top, the Shop / Achievements / Stats tabs below. Splitting the
+	# remaining height rather than nesting tab bars keeps both reachable
+	# without a second level of navigation.
+	_food_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_food_panel.size_flags_stretch_ratio = 1.15
+	stack.add_child(_food_panel)
+
+	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_tabs.size_flags_stretch_ratio = 1.0
+	stack.add_child(_tabs)
+
+	stack.add_child(_footer)
+	return stack
+
+
+func _build_hud() -> PanelContainer:
 	var hud := PanelContainer.new()
 	hud.add_theme_stylebox_override("panel", UiTheme.panel(UiTheme.BG_DARK, 12))
-	column.add_child(hud)
 
 	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 6)
+	stack.add_theme_constant_override("separation", 5)
 	hud.add_child(stack)
 
-	_weight_label = UiTheme.make_label("--", 38, UiTheme.TEXT)
+	_weight_label = UiTheme.make_label("--", 36, UiTheme.TEXT)
 	stack.add_child(_weight_label)
+
+	_class_label = UiTheme.make_label("", 17, UiTheme.GOLD)
+	stack.add_child(_class_label)
 
 	_pound_bar = ProgressBar.new()
 	_pound_bar.custom_minimum_size = Vector2(0, 16)
@@ -160,7 +256,7 @@ func _build_left_column() -> Control:
 
 	stack.add_child(_separator())
 
-	_tier_label = UiTheme.make_label("", 20, UiTheme.GOLD)
+	_tier_label = UiTheme.make_label("", 19, UiTheme.GOLD)
 	stack.add_child(_tier_label)
 
 	_tier_bar = ProgressBar.new()
@@ -174,27 +270,33 @@ func _build_left_column() -> Control:
 
 	stack.add_child(_separator())
 
-	_bank_label = UiTheme.make_label("", 26, UiTheme.GOLD)
+	_bank_label = UiTheme.make_label("", 25, UiTheme.GOLD)
 	stack.add_child(_bank_label)
 
-	_cps_label = UiTheme.make_label("", 18, UiTheme.GOOD)
+	_cps_label = UiTheme.make_label("", 17, UiTheme.GOOD)
 	stack.add_child(_cps_label)
 
-	_click_label = UiTheme.make_label("", 18, UiTheme.TEXT_DIM)
+	_click_label = UiTheme.make_label("", 17, UiTheme.TEXT_DIM)
 	stack.add_child(_click_label)
 
-	_stats_label = UiTheme.make_label("", 14, UiTheme.TEXT_DIM)
-	stack.add_child(_stats_label)
-
-	return column
+	return hud
 
 
-func _build_center_column() -> Control:
+func _build_character() -> TextureRect:
+	var character := TextureRect.new()
+	character.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	character.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	character.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return character
+
+
+func _build_food_panel() -> Control:
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation", 14)
+	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_theme_constant_override("separation", 12)
 
-	_headline = UiTheme.make_label("", 30, UiTheme.TEXT)
+	_headline = UiTheme.make_label("", 28, UiTheme.TEXT)
 	_headline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_headline)
 
@@ -208,47 +310,53 @@ func _build_center_column() -> Control:
 	scroll.add_child(centering)
 
 	_food_grid = GridContainer.new()
-	_food_grid.columns = FOOD_COLUMNS
-	_food_grid.add_theme_constant_override("h_separation", 16)
-	_food_grid.add_theme_constant_override("v_separation", 16)
+	_food_grid.columns = 3
+	_food_grid.add_theme_constant_override("h_separation", 14)
+	_food_grid.add_theme_constant_override("v_separation", 14)
 	centering.add_child(_food_grid)
 
 	return column
 
 
-func _build_right_column() -> Control:
-	var column := VBoxContainer.new()
-	column.custom_minimum_size = Vector2(470, 0)
-	column.add_theme_constant_override("separation", 10)
-
+func _build_tabs() -> TabContainer:
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tabs.add_theme_stylebox_override("panel", UiTheme.panel(UiTheme.BG_DARK, 10))
-	column.add_child(tabs)
 
-	_upgrade_column = _scrolling_list(tabs, "Upgrades")
+	_upgrade_column = _scrolling_list(tabs, "Shop")
 	_achievement_column = _scrolling_list(tabs, "Achievements")
+	_stats_column = _scrolling_list(tabs, "Stats")
 
-	# Buy-quantity selector.
+	for i in 8:
+		var line := UiTheme.make_label("", 17)
+		_stats_column.add_child(line)
+		_stats_lines.append(line)
+
+	return tabs
+
+
+func _build_footer() -> Control:
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 8)
+
 	var buy_row := HBoxContainer.new()
 	buy_row.add_theme_constant_override("separation", 8)
 	column.add_child(buy_row)
 
-	var buy_label := UiTheme.make_label("Buy", 17, UiTheme.TEXT_DIM)
-	buy_row.add_child(buy_label)
+	buy_row.add_child(UiTheme.make_label("Buy", 17, UiTheme.TEXT_DIM))
 
 	for amount in [1, 10, -1]:
 		var button := Button.new()
 		button.text = "MAX" if amount == -1 else "x%d" % amount
 		button.focus_mode = Control.FOCUS_NONE
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size = Vector2(0, 48)
 		button.set_meta("amount", amount)
 		UiTheme.style_button(button, UiTheme.ACCENT_DIM)
 		button.pressed.connect(_on_buy_amount_pressed.bind(amount))
 		buy_row.add_child(button)
 		_buy_buttons.append(button)
 
-	# Footer actions.
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
 	column.add_child(actions)
@@ -257,17 +365,32 @@ func _build_right_column() -> Control:
 	save_button.text = "Save"
 	save_button.focus_mode = Control.FOCUS_NONE
 	save_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	save_button.custom_minimum_size = Vector2(0, 48)
 	UiTheme.style_button(save_button, UiTheme.ACCENT_DIM)
 	save_button.pressed.connect(_on_save_pressed)
 	actions.add_child(save_button)
 
 	var menu_button := Button.new()
-	menu_button.text = "Main Menu"
+	menu_button.text = "Menu"
 	menu_button.focus_mode = Control.FOCUS_NONE
 	menu_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	menu_button.custom_minimum_size = Vector2(0, 48)
 	UiTheme.style_button(menu_button, UiTheme.ACCENT_DIM)
 	menu_button.pressed.connect(_on_menu_pressed)
 	actions.add_child(menu_button)
+
+	# Only present where Lightning payments are permitted. In an app-store
+	# build LightningClient.is_available() is false and this button, the shop
+	# overlay and the networking code are all absent.
+	if LightningClient.is_available():
+		var support_button := Button.new()
+		support_button.text = "Support"
+		support_button.focus_mode = Control.FOCUS_NONE
+		support_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		support_button.custom_minimum_size = Vector2(0, 48)
+		UiTheme.style_button(support_button, UiTheme.GOLD.darkened(0.35))
+		support_button.pressed.connect(_on_support_pressed)
+		actions.add_child(support_button)
 
 	_update_buy_buttons()
 	return column
@@ -294,6 +417,49 @@ func _separator() -> Control:
 	return line
 
 
+func _section_header(text: String) -> Control:
+	var label := UiTheme.make_label(text.to_upper(), 15, UiTheme.ACCENT)
+	label.add_theme_constant_override("outline_size", 0)
+	return label
+
+
+# ---------------------------------------------------------------------------
+# Responsive sizing
+# ---------------------------------------------------------------------------
+
+func _update_grid_columns() -> void:
+	if not is_instance_valid(_food_grid):
+		return
+	var width := get_viewport_rect().size.x
+	var columns := 3
+	if _layout_mode == Layout.PORTRAIT:
+		columns = 2 if width >= 560.0 else 1
+	elif width > 1700.0:
+		columns = 4
+	elif width < 1200.0:
+		columns = 2
+	if _food_grid.columns != columns:
+		_food_grid.columns = columns
+
+
+## Phones need bigger targets and fewer of them; desktops can afford detail.
+func _card_size() -> Vector2:
+	if _layout_mode == Layout.PORTRAIT:
+		var width := get_viewport_rect().size.x
+		var columns := maxi(_food_grid.columns if is_instance_valid(_food_grid) else 2, 1)
+		var each := clampf((width - 60.0) / float(columns), 150.0, 320.0)
+		return Vector2(each, each * 1.05)
+	return FoodButton.CARD_SIZE
+
+
+func _resize_food_cards() -> void:
+	var target := _card_size()
+	for id: String in _food_cards.keys():
+		var card: FoodButton = _food_cards[id]
+		if is_instance_valid(card):
+			card.custom_minimum_size = target
+
+
 # ---------------------------------------------------------------------------
 # Population
 # ---------------------------------------------------------------------------
@@ -312,6 +478,8 @@ func _rebuild_food_cards() -> void:
 		card.configure(data)
 		_food_cards[String(data.get("id", ""))] = card
 
+	_resize_food_cards()
+
 
 func _rebuild_upgrade_rows() -> void:
 	for child in _upgrade_column.get_children():
@@ -319,8 +487,17 @@ func _rebuild_upgrade_rows() -> void:
 		child.queue_free()
 	_upgrade_rows.clear()
 
-	for entry in SceneManager.upgrades():
+	var entries := SceneManager.upgrades()
+	entries.sort_custom(_compare_by_category)
+
+	var current_category := ""
+	for entry in entries:
 		var data: Dictionary = entry
+		var category := String(data.get("category", ""))
+		if category != current_category:
+			current_category = category
+			_upgrade_column.add_child(_section_header(category))
+
 		var row := UpgradeRow.new()
 		_upgrade_column.add_child(row)
 		row.purchase_requested.connect(_on_purchase_requested)
@@ -334,8 +511,17 @@ func _rebuild_achievement_rows() -> void:
 		child.queue_free()
 	_achievement_rows.clear()
 
-	for entry in SceneManager.achievements():
+	var entries := SceneManager.achievements()
+	entries.sort_custom(_compare_by_category)
+
+	var current_category := ""
+	for entry in entries:
 		var data: Dictionary = entry
+		var category := String(data.get("category", ""))
+		if category != current_category:
+			current_category = category
+			_achievement_column.add_child(_section_header(category))
+
 		var card := PanelContainer.new()
 		_achievement_column.add_child(card)
 
@@ -343,8 +529,7 @@ func _rebuild_achievement_rows() -> void:
 		stack.add_theme_constant_override("separation", 1)
 		card.add_child(stack)
 
-		var title := UiTheme.make_label(String(data.get("name", "")), 18)
-		stack.add_child(title)
+		stack.add_child(UiTheme.make_label(String(data.get("name", "")), 18))
 
 		var body := UiTheme.make_label(String(data.get("description", "")), 14,
 			UiTheme.TEXT_DIM)
@@ -353,6 +538,14 @@ func _rebuild_achievement_rows() -> void:
 
 		_achievement_rows[String(data.get("id", ""))] = card
 		_style_achievement(card, bool(data.get("unlocked", false)))
+
+
+## Sorts by the Rust-supplied category order, then keeps the declaration order
+## within a category (which is already cheapest-first).
+func _compare_by_category(a: Variant, b: Variant) -> bool:
+	var da: Dictionary = a
+	var db: Dictionary = b
+	return int(da.get("category_order", 0)) < int(db.get("category_order", 0))
 
 
 func _style_achievement(card: PanelContainer, unlocked: bool) -> void:
@@ -376,46 +569,50 @@ func _refresh_hud() -> void:
 		return
 
 	var tier := int(snap.get("tier", 1))
-	var max_tier := int(snap.get("max_tier", 3))
+	var max_tier := int(snap.get("max_tier", 5))
 	var per_pound := maxf(float(snap.get("calories_per_pound", 3500.0)), 1.0)
 	var into_pound := float(snap.get("calories_into_pound", 0.0))
 	var weight := float(snap.get("weight_lbs", 0.0))
 	var next_tier_weight := float(snap.get("next_tier_weight", -1.0))
 
 	_weight_label.text = Num.weight(weight)
+	_class_label.text = "%s  ·  %s form" % [
+		String(snap.get("weight_class", "")),
+		String(snap.get("character_state", "")),
+	]
 	_pound_bar.value = clampf(into_pound / per_pound, 0.0, 1.0)
 	_pound_caption.text = "%s / %s cal to the next pound" % [
 		Num.fmt(into_pound), Num.fmt(per_pound)]
 
 	_bank_label.text = "%s cal banked" % Num.fmt(float(snap.get("calorie_bank", 0.0)))
-	_cps_label.text = "%s cal/sec idle" % Num.fmt(float(snap.get("cps", 0.0)))
-	_click_label.text = "x%.2f per click" % float(snap.get("click_multiplier", 1.0))
-	_stats_label.text = "%s clicks  ·  %s lifetime cal  ·  %d/%d achievements" % [
-		Num.fmt(float(snap.get("total_clicks", 0))),
-		Num.fmt(float(snap.get("lifetime_calories", 0.0))),
-		int(snap.get("achievements_unlocked", 0)),
-		int(snap.get("achievements_total", 0)),
+	_cps_label.text = "%s/sec  ·  %s/hr" % [
+		Num.fmt(float(snap.get("cps", 0.0))),
+		Num.fmt(float(snap.get("cph", 0.0))),
 	]
+	_click_label.text = "x%s per click" % Num.fmt(float(snap.get("click_multiplier", 1.0)))
 
 	_tier_label.text = "Tier %d of %d" % [tier, max_tier]
 	if next_tier_weight > 0.0:
-		var start := _tier_start_weight(tier)
+		var start := float(snap.get("tier_start_weight", 150.0))
 		var span := maxf(next_tier_weight - start, 0.001)
 		_tier_bar.value = clampf((weight - start) / span, 0.0, 1.0)
-		_tier_caption.text = "%.1f lbs to go until the next evolution" % \
-			maxf(next_tier_weight - weight, 0.0)
+		_tier_caption.text = "%s lbs to the next evolution" % \
+			Num.fmt(maxf(next_tier_weight - weight, 0.0))
 		_tier_bar.visible = true
 	else:
 		_tier_bar.value = 1.0
 		_tier_bar.visible = false
 		_tier_caption.text = "Final form reached."
 
+	_refresh_stats(snap)
+
 	if tier != _last_tier:
 		_last_tier = tier
 		_character.texture = PlaceholderArt.character(tier)
 		_background.texture = PlaceholderArt.backdrop(tier)
-		_headline.text = _kitchen_name(tier)
+		_headline.text = String(snap.get("tier_name", "Kitchen"))
 		_rebuild_food_cards()
+		_rebuild_upgrade_rows()
 
 	var click_mult := float(snap.get("click_multiplier", 1.0))
 	if not is_equal_approx(click_mult, _last_click_mult):
@@ -423,24 +620,20 @@ func _refresh_hud() -> void:
 		_refresh_food_values()
 
 
-## Weight at which the current tier began, used for the evolution progress bar.
-func _tier_start_weight(tier: int) -> float:
-	# Thresholds mirror the Rust `TIER_THRESHOLDS` table.
-	match tier:
-		2:
-			return 175.0
-		3:
-			return 250.0
-	return 150.0
-
-
-func _kitchen_name(tier: int) -> String:
-	match tier:
-		2:
-			return "The Supersize Era"
-		3:
-			return "State Fair Territory"
-	return "Your Average Kitchen"
+func _refresh_stats(snap: Dictionary) -> void:
+	if _stats_lines.size() < 8:
+		return
+	_stats_lines[0].text = "Weight: %s" % Num.weight(float(snap.get("weight_lbs", 0.0)))
+	_stats_lines[1].text = "Weight class: %s" % String(snap.get("weight_class", ""))
+	_stats_lines[2].text = "Lifetime calories: %s" % Num.fmt(float(snap.get("lifetime_calories", 0.0)))
+	_stats_lines[3].text = "Total clicks: %s" % Num.fmt(float(snap.get("total_clicks", 0)))
+	_stats_lines[4].text = "Per click: x%s" % Num.fmt(float(snap.get("click_multiplier", 1.0)))
+	_stats_lines[5].text = "Per minute: %s cal" % Num.fmt(float(snap.get("cpm", 0.0)))
+	_stats_lines[6].text = "Automation owned: %d levels" % int(snap.get("automation_levels", 0))
+	_stats_lines[7].text = "Achievements: %d / %d" % [
+		int(snap.get("achievements_unlocked", 0)),
+		int(snap.get("achievements_total", 0)),
+	]
 
 
 func _refresh_food_values() -> void:
@@ -518,6 +711,22 @@ func _on_menu_pressed() -> void:
 	SceneManager.go_to_title()
 
 
+func _on_support_pressed() -> void:
+	if not LightningClient.is_available():
+		return
+	var shop := PremiumShop.new()
+	# Added to the scene root so it covers the toast layer too.
+	add_child(shop)
+	shop.closed.connect(_on_premium_closed)
+
+
+func _on_premium_closed() -> void:
+	# Entitlements change the click and idle multipliers, so force the HUD and
+	# the food cards to re-read them rather than waiting for a drift check.
+	_last_click_mult = -1.0
+	_refresh_hud()
+
+
 # ---------------------------------------------------------------------------
 # SceneManager signals
 # ---------------------------------------------------------------------------
@@ -586,6 +795,7 @@ func _show_engine_missing() -> void:
 	var back := Button.new()
 	back.text = "Back to title"
 	back.focus_mode = Control.FOCUS_NONE
+	back.custom_minimum_size = Vector2(0, 48)
 	UiTheme.style_button(back, UiTheme.ACCENT_DIM)
 	back.pressed.connect(SceneManager.go_to_title)
 	stack.add_child(back)

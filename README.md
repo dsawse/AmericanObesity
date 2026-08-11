@@ -8,7 +8,14 @@ GrubHub subscription, eventually a drive-thru franchise — until the clicking
 becomes optional and the calories arrive on their own.
 
 Built in **Godot 4**, with the simulation itself written in **Rust** as a
-GDExtension.
+GDExtension. Runs on desktop and Android, with a layout that switches between a
+three-column desktop view and a stacked phone view.
+
+**Further reading**
+
+- [docs/MOBILE.md](docs/MOBILE.md) — Android build pipeline, iOS requirements, store policy
+- [docs/LIGHTNING.md](docs/LIGHTNING.md) — Bitcoin payments, platform gating, threat model
+- [docs/godot-course/](docs/godot-course/README.md) — a Godot course taught through this codebase
 
 ---
 
@@ -102,19 +109,36 @@ in a toast when you come back.
 
 ## Progression
 
-| Tier | Reached at | Unlocks |
-|-----:|-----------:|---------|
-| 1 | 150 lbs | Fries, Soda, Burger |
-| 2 | 175 lbs | Cheezy Fries, Big Gulp, Double Burger |
-| 3 | 250 lbs | Deep-Fried Butter, Family Bucket, Whole Sheet Cake |
+Five tiers across the four weight classes from the design document.
 
-Crossing a threshold plays the evolution cutscene and swaps the character
-sprite and backdrop. Sixteen achievements track clicks, weight, lifetime
-calories, automation owned and calories per second.
+| Tier | Reached at | Weight class | Kitchen | Unlocks |
+|-----:|-----------:|--------------|---------|---------|
+| 1 | 150 lbs | Beginner | Your Average Kitchen | Fries, Soft Drink, Burger |
+| 2 | 250 lbs | Heavyweight | The Comfort Food Era | Pizza, Ice Cream, Fried Chicken |
+| 3 | 500 lbs | Super Size | State Fair Territory | Deep-Fried Butter, Triple Burger, Mega Shake |
+| 4 | 750 lbs | Super Size | Industrial Appetite | Family Bucket, Loaded Nachos, Whole Sheet Cake |
+| 5 | 1,000 lbs | Ultimate Glutton | The Final Buffet | Gravy Fountain, The Whole Hog, The Entire Buffet |
+
+The character sprite has five states — Base, Chunky, Heavy, Massive, Ultimate —
+and gains a chin per tier. Crossing a threshold plays the evolution cutscene and
+swaps both the character and the backdrop.
+
+**15 foods. 16 upgrades. 35 achievements.**
+
+Upgrades are grouped the way the design document describes them:
+
+- **Fast Food Subscriptions** — McDoorDash, UberFeasts, GrubSquad
+- **Kitchen Appliances** — Microwave, Deep Fryer, Industrial Grill
+- **Restaurant Partnerships** — Local Diner, Fast Food Franchise, All-You-Can-Eat Buffet
+- **Body Modifications** — click power
+- **Lifestyle Choices** — idle multipliers
+
+Achievements are grouped into Weight Milestones, Food Mastery, Automation
+Excellence, Clicking and Excess.
 
 Balance lives entirely in `engine/src/clicker_game/defs.rs` — every food,
-upgrade and achievement is a plain struct literal in one file. Nothing in the
-UI needs to change when you add one.
+upgrade, premium item and achievement is a plain struct literal in one file.
+Nothing in the UI needs to change when you add one.
 
 ---
 
@@ -128,9 +152,12 @@ Drop a real PNG at the expected path and it takes over on the next run.
 
 Still missing (placeholders in use):
 
-- `art/soda_can_64x64.png`, `art/soda_can_64x64_flash.png`
 - `art/start_screen.png`
 - `art/nikacado_overweight_comp.png`, `art/nikacado_obese_comp_nbg.png`
+- `art/character_massive.png`, `art/character_ultimate.png` (tiers 4 and 5)
+- every food icon except `burger.png` and `fries.png` — drop
+  `art/<food_id>.png` in and it is picked up automatically, ids are in
+  `defs.rs`
 
 ---
 

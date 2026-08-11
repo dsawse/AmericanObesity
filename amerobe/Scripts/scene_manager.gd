@@ -50,6 +50,10 @@ var pending_tier := 1
 ## that comes up, so offline earnings and achievements are never swallowed.
 var startup_events: Array = []
 
+## Lightning payment client, or `null` where payments are not permitted.
+## App-store builds carry the `store_build` feature tag and never create one.
+var lightning: LightningClient = null
+
 var _autosave_accum := 0.0
 var _changing_scene := false
 
@@ -61,6 +65,12 @@ var _changing_scene := false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_create_game()
+
+	if LightningClient.is_available():
+		lightning = LightningClient.new()
+		lightning.name = "LightningClient"
+		add_child(lightning)
+
 	if not engine_available:
 		return
 
@@ -183,6 +193,30 @@ func achievements() -> Array:
 	if not engine_available:
 		return []
 	return _parse_array(game.achievements_json())
+
+
+func premium() -> Array:
+	if not engine_available:
+		return []
+	return _parse_array(game.premium_json())
+
+
+# ---------------------------------------------------------------------------
+# Premium entitlements
+# ---------------------------------------------------------------------------
+
+## Records a paid premium item. Returns `false` if it was unknown or already
+## owned, so a replayed payment callback cannot grant the same thing twice.
+func grant_entitlement(id: String) -> bool:
+	if not engine_available:
+		return false
+	return game.grant_entitlement(id)
+
+
+func has_entitlement(id: String) -> bool:
+	if not engine_available:
+		return false
+	return game.has_entitlement(id)
 
 
 static func _parse_dict(json: String) -> Dictionary:

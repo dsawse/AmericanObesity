@@ -195,6 +195,9 @@ dictionary matters too — otherwise it holds references to freed nodes.
    *Upgrades* and *Achievements*. It should show total clicks, lifetime calories,
    calories per second, and the click multiplier, each on its own line, updating
    live.
+
+   *(This one has since been built into the game — do it yourself first, then
+   compare against `_build_tabs()` and `_refresh_stats()` in `arena.gd`.)*
 2. Explain why `_rebuild_food_cards()` calls `_food_cards.clear()`. What
    specifically breaks if you delete that line?
 

@@ -36,10 +36,14 @@ static func character(tier: int, size: int = 384) -> Texture2D:
 	if _cache.has(key):
 		return _cache[key]
 
+	# Five character states, per the design document: Base, Chunky, Heavy,
+	# Massive, Ultimate. Only the first three have (partially committed) art.
 	var names := {
 		1: "res://art/nikacado_skinny_comp.png",
 		2: "res://art/nikacado_overweight_comp.png",
 		3: "res://art/nikacado_obese_comp_nbg.png",
+		4: "res://art/character_massive.png",
+		5: "res://art/character_ultimate.png",
 	}
 	var tex := _try_load(names.get(tier, ""))
 	if tex == null:
@@ -246,6 +250,30 @@ static func _draw_food(id: String, color: Color, size: int) -> Texture2D:
 						int(s * 0.16), Color(0.98, 0.98, 0.92))
 				_disc(img, s * (0.22 + 0.18 * i) + s * 0.02, s * 0.14, s * 0.035,
 						Color(1.0, 0.72, 0.20))
+		"pizza":
+			# Whole pie with a slice lifted out.
+			_disc(img, s * 0.5, s * 0.55, s * 0.38, light.darkened(0.15))
+			_disc(img, s * 0.5, s * 0.55, s * 0.33, color)
+			for i in 7:
+				var a := TAU * float(i) / 7.0 + 0.4
+				_disc(img, s * 0.5 + cos(a) * s * 0.19,
+						s * 0.55 + sin(a) * s * 0.19, s * 0.035,
+						Color(0.78, 0.18, 0.18))
+			# A wedge missing from the top-right.
+			for iy in range(int(s * 0.16), int(s * 0.56)):
+				for ix in range(int(s * 0.5), int(s * 0.92)):
+					var dx := float(ix) - s * 0.5
+					var dy := s * 0.55 - float(iy)
+					if dy > 0.0 and dx > 0.0 and dy < dx * 1.6 and dy > dx * 0.35:
+						_px(img, ix, iy, Color(0, 0, 0, 0))
+		"cone":
+			# Scoops on a waffle cone.
+			_taper(img, s * 0.5, int(s * 0.52), int(s * 0.44), s * 0.34, s * 0.04,
+					Color(0.80, 0.60, 0.32))
+			_disc(img, s * 0.42, s * 0.40, s * 0.16, color)
+			_disc(img, s * 0.60, s * 0.42, s * 0.15, light)
+			_disc(img, s * 0.51, s * 0.28, s * 0.15, color.lightened(0.15))
+			_disc(img, s * 0.51, s * 0.16, s * 0.045, Color(0.85, 0.15, 0.25))
 		_:
 			# Generic blob.
 			_disc(img, s * 0.5, s * 0.52, s * 0.36, color)
@@ -256,18 +284,22 @@ static func _draw_food(id: String, color: Color, size: int) -> Texture2D:
 
 static func _shape_for(id: String) -> String:
 	match id:
-		"fries", "cheezy_fries":
+		"fries", "loaded_nachos":
 			return "fries"
-		"soda", "big_gulp":
+		"soda", "mega_shake", "gravy_fountain":
 			return "cup"
-		"burger", "double_burger":
+		"burger", "triple_burger":
 			return "burger"
-		"fried_butter":
+		"fried_butter", "fried_chicken":
 			return "stick"
-		"family_bucket":
+		"family_bucket", "entire_buffet":
 			return "bucket"
 		"sheet_cake":
 			return "cake"
+		"pizza":
+			return "pizza"
+		"ice_cream":
+			return "cone"
 	return "blob"
 
 
@@ -278,14 +310,16 @@ static func _shape_for(id: String) -> String:
 static func _draw_character(tier: int, size: int) -> Texture2D:
 	var img := _blank(size, size)
 	var s := float(size)
-	var t := clampf(float(tier - 1) / 2.0, 0.0, 1.0)
+	# `t` runs 0 -> 1 across the five tiers and drives every proportion below,
+	# so adding a tier needs no new drawing code.
+	var t := clampf(float(tier - 1) / 4.0, 0.0, 1.0)
 
 	var skin := Color(0.92, 0.75, 0.60)
 	var shirt := Color(0.30, 0.45, 0.72).lerp(Color(0.68, 0.28, 0.26), t)
 	var shadow := shirt.darkened(0.30)
 
-	var body_rx := lerpf(s * 0.16, s * 0.38, t)
-	var body_ry := lerpf(s * 0.24, s * 0.30, t)
+	var body_rx := lerpf(s * 0.15, s * 0.44, t)
+	var body_ry := lerpf(s * 0.23, s * 0.33, t)
 	var body_cy := s * 0.62
 	var head_r := lerpf(s * 0.11, s * 0.16, t)
 	var head_cy := body_cy - body_ry - head_r * 0.55
@@ -313,12 +347,11 @@ static func _draw_character(tier: int, size: int) -> Texture2D:
 	_rect(img, int(s * 0.5 - head_r * 0.35), int(head_cy), int(head_r * 0.7),
 			int(head_r * 1.4), skin.darkened(0.10))
 	_disc(img, s * 0.5, head_cy, head_r, skin)
-	if tier >= 2:
-		_ellipse(img, s * 0.5, head_cy + head_r * 0.85, head_r * 0.80,
-				head_r * 0.34, skin.darkened(0.06))
-	if tier >= 3:
-		_ellipse(img, s * 0.5, head_cy + head_r * 1.18, head_r * 0.95,
-				head_r * 0.36, skin.darkened(0.12))
+	# One extra chin per tier.
+	for chin in range(1, mini(tier, 5)):
+		_ellipse(img, s * 0.5, head_cy + head_r * (0.55 + 0.33 * float(chin)),
+				head_r * (0.70 + 0.08 * float(chin)),
+				head_r * 0.32, skin.darkened(0.05 * float(chin)))
 	# Face.
 	_disc(img, s * 0.5 - head_r * 0.35, head_cy - head_r * 0.12, head_r * 0.10,
 			Color(0.10, 0.09, 0.09))
@@ -336,7 +369,8 @@ static func _draw_character(tier: int, size: int) -> Texture2D:
 
 static func _draw_backdrop(tier: int, w: int, h: int) -> Texture2D:
 	var img := _blank(w, h)
-	var top := Color(0.18, 0.15, 0.22).lerp(Color(0.26, 0.14, 0.14), (tier - 1) / 2.0)
+	var top := Color(0.18, 0.15, 0.22).lerp(Color(0.30, 0.13, 0.13),
+			clampf(float(tier - 1) / 4.0, 0.0, 1.0))
 	var bottom := Color(0.09, 0.08, 0.11)
 
 	for y in h:

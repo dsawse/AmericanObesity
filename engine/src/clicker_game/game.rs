@@ -89,6 +89,36 @@ impl ClickerGame {
         }
     }
 
+    /// Weight at which the current tier began. Exposed so the UI never has to
+    /// keep its own copy of the threshold table.
+    #[func]
+    fn tier_start_weight(&self) -> f64 {
+        if self.game.save.tier <= 1 {
+            return defs::STARTING_WEIGHT_LBS;
+        }
+        let idx = (self.game.save.tier - 2) as usize;
+        defs::TIER_THRESHOLDS
+            .get(idx)
+            .copied()
+            .unwrap_or(defs::STARTING_WEIGHT_LBS)
+    }
+
+    #[func]
+    fn weight_class(&self) -> GString {
+        GString::from(self.game.weight_class())
+    }
+
+    #[func]
+    fn character_state(&self) -> GString {
+        GString::from(self.game.character_state())
+    }
+
+    #[func]
+    fn tier_name(&self) -> GString {
+        let idx = (self.game.save.tier - 1) as usize;
+        GString::from(*defs::TIER_NAMES.get(idx).unwrap_or(&"Kitchen"))
+    }
+
     #[func]
     fn cooldown_remaining(&self, id: GString) -> f64 {
         self.game.cooldown_remaining(&id.to_string())
@@ -148,6 +178,40 @@ impl ClickerGame {
         self.game.reset();
     }
 
+    // -- premium entitlements ----------------------------------------------
+
+    /// Records a paid premium item. Returns `false` for an unknown id or one
+    /// already owned, so a replayed payment callback cannot grant twice.
+    #[func]
+    fn grant_entitlement(&mut self, id: GString) -> bool {
+        self.game.grant_entitlement(&id.to_string())
+    }
+
+    #[func]
+    fn has_entitlement(&self, id: GString) -> bool {
+        self.game.has_entitlement(&id.to_string())
+    }
+
+    /// The premium catalogue with prices and ownership, as a JSON array.
+    #[func]
+    fn premium_json(&self) -> GString {
+        let items: Vec<_> = defs::PREMIUM
+            .iter()
+            .map(|p| {
+                json!({
+                    "id": p.id,
+                    "name": p.name,
+                    "description": p.description,
+                    "sats": p.sats,
+                    "kind": p.kind.as_str(),
+                    "power": p.power,
+                    "owned": self.game.has_entitlement(p.id),
+                })
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(items).to_string())
+    }
+
     // -- persistence -------------------------------------------------------
 
     /// Serializes the run. GDScript owns the actual file I/O.
@@ -188,9 +252,18 @@ impl ClickerGame {
             "cps": self.game.cps(),
             "click_multiplier": self.game.click_multiplier(),
             "idle_multiplier": self.game.idle_multiplier(),
+            "cpm": self.game.cps() * 60.0,
+            "cph": self.game.cps() * 3600.0,
             "tier": self.game.save.tier,
             "max_tier": MAX_TIER,
+            "tier_name": self.game.save.tier.checked_sub(1)
+                .and_then(|i| defs::TIER_NAMES.get(i as usize))
+                .copied()
+                .unwrap_or("Kitchen"),
             "next_tier_weight": self.next_tier_weight(),
+            "tier_start_weight": self.tier_start_weight(),
+            "weight_class": self.game.weight_class(),
+            "character_state": self.game.character_state(),
             "total_clicks": self.game.save.total_clicks,
             "automation_levels": self.game.automation_levels(),
             "achievements_unlocked": self.game.save.achievements.len(),
@@ -247,6 +320,8 @@ impl ClickerGame {
                     "name": u.name,
                     "description": u.description,
                     "kind": u.kind.as_str(),
+                    "category": u.category.as_str(),
+                    "category_order": u.category.sort_key(),
                     "effect": effect,
                     "owned": owned,
                     "max_level": u.max_level,
@@ -275,6 +350,8 @@ impl ClickerGame {
                     "id": a.id,
                     "name": a.name,
                     "description": a.description,
+                    "category": a.category.as_str(),
+                    "category_order": a.category.sort_key(),
                     "unlocked": self.game.save.achievements.iter().any(|id| id == a.id),
                 })
             })

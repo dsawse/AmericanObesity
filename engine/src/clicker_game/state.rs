@@ -37,6 +37,9 @@ pub struct SaveState {
     pub food_clicks: BTreeMap<String, u64>,
     #[serde(default)]
     pub achievements: Vec<String>,
+    /// Premium items bought with Lightning. Ids from [`defs::PREMIUM`].
+    #[serde(default)]
+    pub entitlements: Vec<String>,
     /// Unix timestamp of the last save, used for offline earnings.
     #[serde(default)]
     pub last_seen_unix: f64,
@@ -57,6 +60,7 @@ impl Default for SaveState {
             upgrades: BTreeMap::new(),
             food_clicks: BTreeMap::new(),
             achievements: Vec::new(),
+            entitlements: Vec::new(),
             last_seen_unix: 0.0,
         }
     }
@@ -127,12 +131,48 @@ impl Game {
             .sum()
     }
 
+    // -- premium entitlements ----------------------------------------------
+
+    pub fn has_entitlement(&self, id: &str) -> bool {
+        self.save.entitlements.iter().any(|e| e == id)
+    }
+
+    /// Records a premium purchase. Returns `false` for an unknown id or one
+    /// already owned, so the caller can tell a real grant from a no-op.
+    pub fn grant_entitlement(&mut self, id: &str) -> bool {
+        if defs::premium(id).is_none() || self.has_entitlement(id) {
+            return false;
+        }
+        self.save.entitlements.push(id.to_string());
+        self.check_progress();
+        true
+    }
+
+    /// Product of every owned premium item of `kind`.
+    fn premium_multiplier(&self, kind: defs::PremiumKind) -> f64 {
+        defs::PREMIUM
+            .iter()
+            .filter(|p| p.kind == kind && self.has_entitlement(p.id))
+            .fold(1.0, |acc, p| acc * p.power)
+    }
+
+    /// Offline cap in seconds, extended by the freezer entitlement.
+    fn offline_cap_seconds(&self) -> f64 {
+        let hours = defs::PREMIUM
+            .iter()
+            .filter(|p| p.kind == defs::PremiumKind::OfflineHours && self.has_entitlement(p.id))
+            .map(|p| p.power)
+            .fold(OFFLINE_CAP_SECONDS / 3600.0, f64::max);
+        hours * 3600.0
+    }
+
     /// Multiplier applied to every automation source.
     pub fn idle_multiplier(&self) -> f64 {
         UPGRADES
             .iter()
             .filter(|u| u.kind == UpgradeKind::IdleBoost)
             .fold(1.0, |acc, u| acc * (1.0 + u.power * self.owned(u.id) as f64))
+            * self.premium_multiplier(defs::PremiumKind::IdleMultiplier)
     }
 
     /// Multiplier applied to manual clicks.
@@ -141,6 +181,7 @@ impl Game {
             .iter()
             .filter(|u| u.kind == UpgradeKind::ClickPower)
             .fold(1.0, |acc, u| acc * (1.0 + u.power * self.owned(u.id) as f64))
+            * self.premium_multiplier(defs::PremiumKind::ClickMultiplier)
     }
 
     /// Passive calories per second.
@@ -169,6 +210,28 @@ impl Game {
 
     pub fn cooldown_remaining(&self, id: &str) -> f64 {
         self.cooldowns.get(id).copied().unwrap_or(0.0).max(0.0)
+    }
+
+    /// Times a single food item has been clicked.
+    pub fn food_clicks(&self, id: &str) -> u64 {
+        self.save.food_clicks.get(id).copied().unwrap_or(0)
+    }
+
+    /// Total clicks across every food belonging to `tier`.
+    pub fn tier_food_clicks(&self, tier: u32) -> u64 {
+        FOODS
+            .iter()
+            .filter(|f| f.unlock_tier == tier)
+            .map(|f| self.food_clicks(f.id))
+            .sum()
+    }
+
+    pub fn weight_class(&self) -> &'static str {
+        defs::weight_class(self.weight_lbs())
+    }
+
+    pub fn character_state(&self) -> &'static str {
+        defs::character_state(self.weight_lbs())
     }
 
     // -- mutation ----------------------------------------------------------
@@ -291,7 +354,7 @@ impl Game {
         if last <= 0.0 || now_unix <= last {
             return 0.0;
         }
-        let elapsed = (now_unix - last).min(OFFLINE_CAP_SECONDS);
+        let elapsed = (now_unix - last).min(self.offline_cap_seconds());
         // Anything under a minute is not worth a popup.
         if elapsed < 60.0 {
             return 0.0;
@@ -358,8 +421,13 @@ impl Game {
                 Condition::Weight(w) => self.weight_lbs() >= w,
                 Condition::Lifetime(c) => self.save.lifetime_calories >= c,
                 Condition::AutomationOwned(n) => self.automation_levels() >= n,
+                Condition::UpgradeLevel(id, n) => self.owned(id) >= n,
                 Condition::Tier(t) => self.save.tier >= t,
                 Condition::Cps(c) => self.cps() >= c,
+                Condition::ClickPower(m) => self.click_multiplier() >= m,
+                Condition::FoodClicks(id, n) => self.food_clicks(id) >= n,
+                Condition::TierFoodClicks(tier, n) => self.tier_food_clicks(tier) >= n,
+                Condition::Banked(c) => self.save.calorie_bank >= c,
             };
             if met {
                 self.save.achievements.push(a.id.to_string());
@@ -403,6 +471,12 @@ impl Game {
                 save.food_clicks.retain(|id, _| defs::food(id).is_some());
                 save.achievements
                     .retain(|id| ACHIEVEMENTS.iter().any(|a| a.id == *id));
+                save.entitlements.retain(|id| defs::premium(id).is_some());
+                // `dedup` only collapses *consecutive* duplicates, so sort
+                // first. Otherwise a hand-edited save listing the same item
+                // twice would apply its multiplier twice.
+                save.entitlements.sort();
+                save.entitlements.dedup();
 
                 self.save = save;
                 self.cooldowns.clear();
@@ -437,7 +511,7 @@ mod tests {
     #[test]
     fn locked_food_is_rejected() {
         let mut g = Game::new();
-        assert_eq!(g.click_food("double_burger"), 0.0);
+        assert_eq!(g.click_food("pizza"), 0.0);
         assert_eq!(g.click_food("not_a_real_food"), 0.0);
     }
 
@@ -451,15 +525,69 @@ mod tests {
     #[test]
     fn tier_promotes_and_unlocks_food() {
         let mut g = Game::new();
-        // 175 lbs == 25 lbs gained == 87_500 calories.
-        g.save.lifetime_calories = 25.0 * CALORIES_PER_POUND;
+        // Tier 2 is 250 lbs, i.e. 100 lbs gained == 350_000 calories.
+        g.save.lifetime_calories = 100.0 * CALORIES_PER_POUND;
         g.check_progress();
         assert_eq!(g.save.tier, 2);
-        assert!(g.food_unlocked("double_burger"));
+        assert!(g.food_unlocked("pizza"));
+        assert!(!g.food_unlocked("fried_butter"));
         assert!(g
             .events
             .iter()
             .any(|e| matches!(e, Event::TierUp { tier: 2 })));
+    }
+
+    #[test]
+    fn a_single_check_can_span_several_tiers() {
+        let mut g = Game::new();
+        // Straight past 250, 500, 750 and 1000 lbs in one go.
+        g.save.lifetime_calories = 2_000.0 * CALORIES_PER_POUND;
+        g.check_progress();
+        assert_eq!(g.save.tier, MAX_TIER);
+        assert!(g.food_unlocked("entire_buffet"));
+
+        let tier_ups = g
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::TierUp { .. }))
+            .count();
+        assert_eq!(tier_ups, 4);
+    }
+
+    #[test]
+    fn weight_classes_track_the_design_document() {
+        let mut g = Game::new();
+        assert_eq!(g.weight_class(), "Beginner");
+        assert_eq!(g.character_state(), "Base");
+
+        g.save.lifetime_calories = 100.0 * CALORIES_PER_POUND; // 250 lbs
+        assert_eq!(g.weight_class(), "Heavyweight");
+        assert_eq!(g.character_state(), "Chunky");
+
+        g.save.lifetime_calories = 350.0 * CALORIES_PER_POUND; // 500 lbs
+        assert_eq!(g.weight_class(), "Super Size");
+        assert_eq!(g.character_state(), "Heavy");
+
+        g.save.lifetime_calories = 600.0 * CALORIES_PER_POUND; // 750 lbs
+        assert_eq!(g.character_state(), "Massive");
+
+        g.save.lifetime_calories = 850.0 * CALORIES_PER_POUND; // 1000 lbs
+        assert_eq!(g.weight_class(), "Ultimate Glutton");
+        assert_eq!(g.character_state(), "Ultimate");
+    }
+
+    #[test]
+    fn food_mastery_counts_per_tier() {
+        let mut g = Game::new();
+        assert_eq!(g.tier_food_clicks(1), 0);
+
+        g.click_food("fries");
+        g.tick(0.5);
+        g.click_food("soda");
+        assert_eq!(g.tier_food_clicks(1), 2);
+        assert_eq!(g.food_clicks("fries"), 1);
+        // Tier 2 is still locked, so nothing landed there.
+        assert_eq!(g.tier_food_clicks(2), 0);
     }
 
     #[test]
@@ -536,6 +664,59 @@ mod tests {
         assert!(g.from_json(r#"{"upgrades":{"ghost_upgrade":9},"tier":99}"#));
         assert_eq!(g.owned("ghost_upgrade"), 0);
         assert_eq!(g.save.tier, MAX_TIER);
+    }
+
+    #[test]
+    fn premium_multipliers_stack_on_top_of_upgrades() {
+        let mut g = Game::new();
+        let base_click = g.click_multiplier();
+        assert!(g.grant_entitlement("golden_spatula"));
+        assert!((g.click_multiplier() - base_click * 2.0).abs() < 1e-9);
+
+        // Granting twice is a no-op, so a replayed payment cannot double-apply.
+        assert!(!g.grant_entitlement("golden_spatula"));
+        assert!((g.click_multiplier() - base_click * 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn unknown_entitlements_are_refused_and_stripped() {
+        let mut g = Game::new();
+        assert!(!g.grant_entitlement("free_money_please"));
+        assert!(!g.has_entitlement("free_money_please"));
+
+        assert!(g.from_json(r#"{"entitlements":["free_money_please","neon_kitchen"]}"#));
+        assert!(!g.has_entitlement("free_money_please"));
+        assert!(g.has_entitlement("neon_kitchen"));
+    }
+
+    #[test]
+    fn duplicated_entitlements_do_not_stack() {
+        let mut g = Game::new();
+        let base = g.click_multiplier();
+        // A hand-edited save listing the same item three times, non-adjacent.
+        assert!(g.from_json(
+            r#"{"entitlements":["golden_spatula","neon_kitchen","golden_spatula"]}"#
+        ));
+        assert_eq!(g.save.entitlements.len(), 2);
+        assert!((g.click_multiplier() - base * 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn freezer_extends_the_offline_cap() {
+        let mut g = Game::new();
+        g.save.calorie_bank = 100.0;
+        g.buy_upgrade("microwave");
+        let cps = g.cps();
+
+        g.mark_seen(1_000.0);
+        let capped = g.apply_offline(1_000.0 + 100.0 * 3600.0);
+        assert!((capped - cps * OFFLINE_CAP_SECONDS * OFFLINE_EFFICIENCY).abs() < 1e-6);
+
+        g.grant_entitlement("deep_freezer");
+        g.mark_seen(1_000.0);
+        let extended = g.apply_offline(1_000.0 + 100.0 * 3600.0);
+        assert!((extended - cps * 24.0 * 3600.0 * OFFLINE_EFFICIENCY).abs() < 1e-6);
+        assert!(extended > capped);
     }
 
     #[test]

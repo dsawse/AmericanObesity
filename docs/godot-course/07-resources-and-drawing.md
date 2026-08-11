@@ -183,13 +183,18 @@ The character sprite is then just layered ellipses, with the proportions
 interpolated by tier:
 
 ```gdscript
-var t := clampf(float(tier - 1) / 2.0, 0.0, 1.0)
-var body_rx := lerpf(s * 0.16, s * 0.38, t)
-var body_ry := lerpf(s * 0.24, s * 0.30, t)
+var t := clampf(float(tier - 1) / 4.0, 0.0, 1.0)
+var body_rx := lerpf(s * 0.15, s * 0.44, t)
+var body_ry := lerpf(s * 0.23, s * 0.33, t)
 ```
 
-`t` goes 0 → 0.5 → 1 across the three tiers, and every dimension lerps along it.
-One code path, three sprites. Add a fourth tier and the maths still works.
+`t` runs 0 → 1 across the five tiers, and every dimension lerps along it. One
+code path, five sprites.
+
+This claim was tested for real: the game shipped with three tiers, then grew to
+five. The only change needed here was the `/ 2.0` becoming `/ 4.0`. Parameterise
+by a normalised position rather than by an index and content additions stay
+free.
 
 ## Caching
 

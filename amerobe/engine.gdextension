@@ -10,6 +10,8 @@ reloadable = false
 ; silently absent and none of the game logic ran.
 
 [libraries]
+
+; --- Desktop ---------------------------------------------------------------
 linux.debug.x86_64 = "res://../target/debug/libengine.so"
 linux.release.x86_64 = "res://../target/release/libengine.so"
 windows.debug.x86_64 = "res://../target/debug/engine.dll"
@@ -18,5 +20,28 @@ macos.debug = "res://../target/debug/libengine.dylib"
 macos.release = "res://../target/release/libengine.dylib"
 macos.debug.arm64 = "res://../target/debug/libengine.dylib"
 macos.release.arm64 = "res://../target/release/libengine.dylib"
+
+; --- Android ---------------------------------------------------------------
+; Produced by build-android.ps1, which shells out to cargo-ndk. arm64 covers
+; essentially every real device; arm32 and x86_64 are for old hardware and the
+; emulator respectively.
+android.debug.arm64 = "res://../target/aarch64-linux-android/debug/libengine.so"
+android.release.arm64 = "res://../target/aarch64-linux-android/release/libengine.so"
+android.debug.arm32 = "res://../target/armv7-linux-androideabi/debug/libengine.so"
+android.release.arm32 = "res://../target/armv7-linux-androideabi/release/libengine.so"
+android.debug.x86_64 = "res://../target/x86_64-linux-android/debug/libengine.so"
+android.release.x86_64 = "res://../target/x86_64-linux-android/release/libengine.so"
+
+; --- iOS -------------------------------------------------------------------
+; iOS forbids loading arbitrary dynamic libraries, so the extension must be a
+; static library. That needs `crate-type = ["staticlib"]` and a macOS host with
+; Xcode; see docs/MOBILE.md. Left commented so the project loads cleanly on
+; platforms where these files do not exist.
+; ios.debug = "res://../target/aarch64-apple-ios/debug/libengine.a"
+; ios.release = "res://../target/aarch64-apple-ios/release/libengine.a"
+; ios.debug.simulator = "res://../target/aarch64-apple-ios-sim/debug/libengine.a"
+; ios.release.simulator = "res://../target/aarch64-apple-ios-sim/release/libengine.a"
+
+; --- Web -------------------------------------------------------------------
 web.debug.wasm32 = "res://../target/wasm32-unknown-emscripten/debug/engine.wasm"
 web.release.wasm32 = "res://../target/wasm32-unknown-emscripten/release/engine.wasm"

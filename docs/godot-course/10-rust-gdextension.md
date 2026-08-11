@@ -188,7 +188,7 @@ simulation is testable with plain `cargo test`, no engine, no window:
 cargo test -p engine
 ```
 
-Eleven tests run in milliseconds:
+Seventeen tests run in milliseconds:
 
 ```rust
 #[test]
